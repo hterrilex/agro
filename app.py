@@ -1,10 +1,7 @@
 import os
 import numpy as np
 import pandas as pd
-from sklearn.compose import ColumnTransformer
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+import joblib
 import streamlit as st
 
 # Configuración inicial de la página web
@@ -19,66 +16,31 @@ st.markdown(
     "rinde basándose en los patrones climáticos históricos de la zona."
 )
 
-
+# Cargamos el dataset y el modelo de forma rápida con manejo de errores descriptivo
 @st.cache_resource
-def entrenar_modelo_campeon():
+def cargar_recursos():
   BASE_DIR = os.path.dirname(os.path.abspath(__file__))
   csv_path = os.path.join(BASE_DIR, 'dataset_agro_clima_con_ratio_perdida.csv')
-
+  model_path = os.path.join(BASE_DIR, 'modelo_entrenado.pkl')
+  
+  if not os.path.exists(csv_path):
+    raise FileNotFoundError(f"No se encontró el archivo de datos en: {csv_path}")
+  if not os.path.exists(model_path):
+    raise FileNotFoundError(f"No se encontró el archivo del modelo en: {model_path}")
+    
   df = pd.read_csv(csv_path, encoding='utf-8-sig')
-  df_model = df[df['rendimiento_kgxha'] > 0].copy()
+  pipeline = joblib.load(model_path)
+  return pipeline, df
 
-  features_num = [
-      'anio',
-      'lluvia_total_ciclo_mm',
-      'lluvia_periodo_critico_mm',
-      'temp_media_ciclo',
-      'dias_ola_calor',
-      'ratio_perdida_area',
-  ]
-  features_cat = ['cultivo', 'provincia', 'grupo_cultivo']
-
-  X = df_model[features_num + features_cat]
-  y = df_model['rendimiento_kgxha']
-
-  train_mask = X['anio'] <= 2018
-  X_train, y_train = X[train_mask], y[train_mask]
-
-  preprocessor = ColumnTransformer(
-      transformers=[
-          ('num', StandardScaler(), features_num),
-          (
-              'cat',
-              OneHotEncoder(handle_unknown='ignore', sparse_output=False),
-              features_cat,
-          ),
-      ]
-  )
-
-  model_pipeline = Pipeline(
-      steps=[
-          ('preprocessor', preprocessor),
-          (
-              'model',
-              RandomForestRegressor(
-                  n_estimators=100,
-                  max_depth=15,
-                  min_samples_split=10,
-                  random_state=42,
-                  n_jobs=-1,
-              ),
-          ),
-      ]
-  )
-
-  model_pipeline.fit(X_train, y_train)
-  return model_pipeline, df
-
-
-with st.spinner('Cargando y optimizando el motor de Machine Learning...'):
-  pipeline, df_base = entrenar_modelo_campeon()
-
-st.success('¡Modelo cargado con éxito!')
+try:
+  with st.spinner('Cargando motor de Machine Learning pre-entrenado...'):
+    pipeline, df_base = cargar_recursos()
+  st.success('¡Aplicación lista para usar!')
+except Exception as e:
+  st.error("❌ Error al cargar los recursos de la aplicación")
+  st.info("Detalles técnicos del error para diagnóstico:")
+  st.code(str(e))
+  st.stop()
 
 # --- INTERFAZ SIMPLIFICADA (MENOS FRICCIÓN PARA EL USUARIO) ---
 st.sidebar.header('Ubicación y Cultivo')
@@ -113,7 +75,6 @@ escenario_climatico = st.sidebar.selectbox(
 )
 
 # --- LÓGICA DE IMPUTACIÓN AUTOMÁTICA DE CLIMA BASADA EN HISTÓRICO ZONAL ---
-# Filtramos el histórico de ese departamento y cultivo para calcular la mediana climática real
 df_zonal = df_base[
     (df_base['provincia'] == provincia_sel)
     & (df_base['departamento'] == departamento_sel)
@@ -121,7 +82,6 @@ df_zonal = df_base[
 ]
 
 if df_zonal.empty:
-  # Fallback global si no hay datos específicos para ese departamento exacto
   df_zonal = df_base[df_base['cultivo'] == cultivo_sel]
 
 # Calculamos las medianas históricas base
@@ -140,7 +100,6 @@ elif escenario_climatico == 'Año Húmedo (Niño)':
   base_lluvia_crit *= 1.20
   base_calor = max(0, base_calor - 2)
 
-# Ratio de pérdida típico por defecto
 ratio_perdida_def = 0.05
 
 # --- PREDICCIÓN AUTOMÁTICA ---
