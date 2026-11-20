@@ -1,5 +1,4 @@
 import os
-import numpy as np
 import pandas as pd
 import joblib
 import streamlit as st
@@ -11,36 +10,42 @@ st.set_page_config(
 
 st.title("🌾 Aplicativo Predictivo de Rendimiento Agrícola")
 st.markdown(
-    "Herramienta inteligente basada en **Machine Learning (Random Forest "
-    "Optimizado)**. Ingrese la ubicación y el cultivo; el sistema estimará el "
-    "rinde basándose en los patrones climáticos históricos de la zona."
+    "Herramienta inteligente basada en **Machine Learning (Random Forest"
+    " Optimizado)**. Ingrese la ubicación y el cultivo; el sistema estimará el"
+    " rinde basándose en los patrones climáticos históricos de la zona."
 )
 
-# Cargamos el dataset y el modelo de forma rápida con manejo de errores descriptivo
+
 @st.cache_resource
-def cargar_recursos():
+def cargar_modelo():
+  BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+  model_path = os.path.join(BASE_DIR, 'modelo_agro.joblib')
+
+  if not os.path.exists(model_path):
+    raise FileNotFoundError(
+        f"No se encontró el modelo preentrenado en: {model_path}. "
+        "Ejecute entrenar_modelo.py para generarlo."
+    )
+
+  return joblib.load(model_path)
+
+
+@st.cache_data
+def cargar_datos():
   BASE_DIR = os.path.dirname(os.path.abspath(__file__))
   csv_path = os.path.join(BASE_DIR, 'dataset_agro_clima_con_ratio_perdida.csv')
-  model_path = os.path.join(BASE_DIR, 'modelo_entrenado.pkl')
-  
+
   if not os.path.exists(csv_path):
     raise FileNotFoundError(f"No se encontró el archivo de datos en: {csv_path}")
-  if not os.path.exists(model_path):
-    raise FileNotFoundError(f"No se encontró el archivo del modelo en: {model_path}")
-    
-  df = pd.read_csv(csv_path, encoding='utf-8-sig')
-  pipeline = joblib.load(model_path)
-  return pipeline, df
 
-try:
-  with st.spinner('Cargando motor de Machine Learning pre-entrenado...'):
-    pipeline, df_base = cargar_recursos()
-  st.success('¡Aplicación lista para usar!')
-except Exception as e:
-  st.error("❌ Error al cargar los recursos de la aplicación")
-  st.info("Detalles técnicos del error para diagnóstico:")
-  st.code(str(e))
-  st.stop()
+  return pd.read_csv(csv_path, encoding='utf-8-sig')
+
+
+with st.spinner('Cargando modelo preentrenado y datos...'):
+  pipeline = cargar_modelo()
+  df_base = cargar_datos()
+
+st.success('¡Aplicación lista para usar!')
 
 # --- INTERFAZ SIMPLIFICADA (MENOS FRICCIÓN PARA EL USUARIO) ---
 st.sidebar.header('Ubicación y Cultivo')
@@ -75,6 +80,7 @@ escenario_climatico = st.sidebar.selectbox(
 )
 
 # --- LÓGICA DE IMPUTACIÓN AUTOMÁTICA DE CLIMA BASADA EN HISTÓRICO ZONAL ---
+# Filtramos el histórico de ese departamento y cultivo para calcular la mediana climática real
 df_zonal = df_base[
     (df_base['provincia'] == provincia_sel)
     & (df_base['departamento'] == departamento_sel)
@@ -82,6 +88,7 @@ df_zonal = df_base[
 ]
 
 if df_zonal.empty:
+  # Fallback global si no hay datos específicos para ese departamento exacto
   df_zonal = df_base[df_base['cultivo'] == cultivo_sel]
 
 # Calculamos las medianas históricas base
@@ -100,6 +107,7 @@ elif escenario_climatico == 'Año Húmedo (Niño)':
   base_lluvia_crit *= 1.20
   base_calor = max(0, base_calor - 2)
 
+# Ratio de pérdida típico por defecto
 ratio_perdida_def = 0.05
 
 # --- PREDICCIÓN AUTOMÁTICA ---
@@ -120,7 +128,7 @@ if st.button('Estimar Rendimiento de la Región'):
 
   st.markdown('---')
   st.subheader('Resultado de la Predicción')
-  col1, col2 = st.columns(2)
+  col1, col2 = col3 = st.columns(2)
 
   with col1:
     st.metric(
@@ -136,7 +144,7 @@ if st.button('Estimar Rendimiento de la Región'):
   st.success(
       f'**Simulación exitosa:** Para el cultivo de **{cultivo_sel}** en el'
       f' departamento de **{departamento_sel} ({provincia_sel})** bajo un'
-      f' escenario climático **{escenario_climatico}** en la campaña'
+      f' escenario climáico **{escenario_climatico}** en la campaña'
       f' **{anio_sel}**, el modelo estima un rinde de **{prediccion_rinde:,.2f}'
       f' kg/ha** (utilizando una referencia histórica zonal de'
       f' {base_lluvia_crit:.0f} mm críticos).'
